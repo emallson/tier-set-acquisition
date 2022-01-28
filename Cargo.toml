@@ -1,0 +1,18 @@
+[package]
+name = "tier-set-sim"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitvec = "1.0.0"
+online-moments = { git = "https://github.com/emallson/online-moments.git" }
+rand = "0.8.4"
+rand_xoshiro = "0.6.0"
+rayon = "1.5.1"
+serde = { version = "1.0.133", features = ["derive"]}
+serde_json = "1.0.78"
+statrs = "0.15.0"
+structopt = "0.3.26"
+toml = "0.5.8"

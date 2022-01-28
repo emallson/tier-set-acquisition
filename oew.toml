@@ -1,0 +1,34 @@
+clears_per_week = 2
+num_samples = 10000
+num_vault_items = 3
+
+[trading_rule]
+source = "After4pc"
+target = "LeastPieces"
+
+[members]
+Eisenpelz = "Monk"
+Vaelldur = "DemonHunter"
+Tendronas = "DemonHunter"
+Wings = "Rogue"
+Rav = "Rogue"
+Nanuss = "Warrior"
+Atela = "DeathKnight"
+Altenna = "Shaman"
+Nosimage = "Mage"
+Zuko = "Mage"
+Divisive = "Druid"
+Jop = "Druid"
+Flemingo = "Druid"
+Kim = "Priest"
+Heiji = "Priest"
+Ivan = "Hunter"
+Kap = "Hunter"
+Traltixx = "Hunter"
+Gucci = "Warlock"
+Mesprit = "Warlock"
+Sokchoy = "Priest"
+Kadmix = "Priest"
+Maelz = "Shaman"
+Velium = "Monk"
+Keegan = "Paladin"
