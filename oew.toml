@@ -1,9 +1,9 @@
 clears_per_week = 2
-num_samples = 10000
+num_samples = 100000
 num_extra_vault_items = 3
 
 [trading_rule]
-source = "After4pc"
+source = "Always"
 target = "LeastPieces"
 
 [members]

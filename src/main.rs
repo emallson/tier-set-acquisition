@@ -3,9 +3,9 @@ use rand::distributions::{Bernoulli, Distribution};
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
 use rayon::prelude::*;
-use serde::{Serialize, Deserialize};
-use statrs::statistics::Statistics;
+use serde::{Deserialize, Serialize};
 use statrs::distribution::Binomial;
+use statrs::statistics::{Data, OrderStatistics, Statistics};
 use std::collections::{BTreeMap, HashMap};
 use structopt::StructOpt;
 
@@ -93,6 +93,7 @@ struct State {
     comp: Vec<Class>,
     has: BTreeMap<Slot, BitArray>,
     num_slots: Vec<u8>,
+    completion_week: Vec<Option<u8>>,
     trading_rule: TradingRule,
     bonus_chance: Bernoulli,
     /// Chance for a vault slot to be tier for non-raid slots. Raid slots use the raid loot table.
@@ -114,6 +115,14 @@ impl State {
         }
     }
 
+    fn mark_completion_dates(&mut self, week: u8) {
+        for (&slots, compl) in self.num_slots.iter().zip(self.completion_week.iter_mut()) {
+            if slots >= 4 && compl.is_none() {
+                *compl = Some(week);
+            }
+        }
+    }
+
     fn trade_item(&self, source: usize, slot: Slot, cls: Class) -> Option<usize> {
         let num_pieces = self.num_slots[source];
 
@@ -121,7 +130,7 @@ impl State {
             use TradingSourceRule::*;
             match self.trading_rule.source {
                 NoTrading => return None,
-                Always => {},
+                Always => {}
                 After2pc => {
                     if num_pieces < 2 {
                         return None;
@@ -148,14 +157,14 @@ impl State {
                 .comp
                 .iter()
                 .enumerate()
-                .filter(|(_ix, &tcls)| tcls == cls)
+                .filter(|&(ix, &tcls)| tcls == cls && !self.has[&slot][ix])
                 .nth(0)
                 .map(|(ix, _)| ix),
             MostPieces => {
                 let mut target = None;
                 let mut target_items = None;
                 for (ix, &tcls) in self.comp.iter().enumerate() {
-                    if tcls != cls {
+                    if tcls != cls || self.has[&slot][ix] {
                         continue;
                     }
                     let items = self.num_slots[ix];
@@ -172,7 +181,7 @@ impl State {
                 let mut target = None;
                 let mut target_items = None;
                 for (ix, &tcls) in self.comp.iter().enumerate() {
-                    if tcls != cls {
+                    if tcls != cls || self.has[&slot][ix] {
                         continue;
                     }
                     let items = self.num_slots[ix];
@@ -223,9 +232,11 @@ impl State {
                 .cloned()
                 .map(|slot| (slot, slots.clone()))
                 .collect(),
+            completion_week: vec![None; num_players],
             num_slots: vec![0; num_players],
             trading_rule: settings.trading_rule.clone(),
-            nonraid_vault_chance: Binomial::new(0.2, settings.num_extra_vault_items as u64).unwrap(),
+            nonraid_vault_chance: Binomial::new(0.2, settings.num_extra_vault_items as u64)
+                .unwrap(),
         }
     }
 
@@ -269,6 +280,7 @@ impl State {
 
 #[derive(Debug, Serialize)]
 struct Sample {
+    completion_weeks: Vec<u8>,
     n_weeks: u8,
     pct_2pc: Vec<f64>,
     pct_4pc: Vec<f64>,
@@ -295,6 +307,8 @@ fn sample_completion_time(settings: &Settings) -> Sample {
         }
 
         state.award_vault(&mut rng, weeks > 1);
+        state.mark_completion_dates(weeks);
+
         pct_2pc.push(state.completion_pct(2));
 
         let completion = state.completion_pct(4);
@@ -306,9 +320,40 @@ fn sample_completion_time(settings: &Settings) -> Sample {
     }
 
     Sample {
+        completion_weeks: state
+            .completion_week
+            .into_iter()
+            .map(Option::unwrap)
+            .collect(),
         n_weeks: weeks,
         pct_2pc,
         pct_4pc,
+    }
+}
+
+fn print_per_player(settings: &Settings, samples: &[Sample]) {
+    let mut completions: Vec<Vec<f64>> = Vec::with_capacity(settings.comp.members.len());
+    for _ in 0..settings.comp.members.len() {
+        completions.push(Vec::with_capacity(samples.len()));
+    }
+
+    for sample in samples {
+        for (ix, &wk) in sample.completion_weeks.iter().enumerate() {
+            completions[ix].push(wk as f64);
+        }
+    }
+
+    let mut names = settings.comp.members.iter().collect::<Vec<_>>();
+    names.sort_by_key(|t| t.0);
+    for (ix, wks) in completions.into_iter().enumerate() {
+        let mut data = Data::new(wks);
+        println!(
+            "{:>12}\t{:>12}\t{}\t{}",
+            names[ix].0,
+            format!("{:?}", names[ix].1),
+            data.quantile(0.025),
+            data.quantile(0.975)
+        );
     }
 }
 
@@ -326,12 +371,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     std::fs::write(&opts.output, serde_json::to_vec(&samples)?)?;
 
-    let weeks = samples.iter().map(|s| s.n_weeks as f64).collect::<Vec<_>>();
+    let mut weeks = Data::new(samples.iter().map(|s| s.n_weeks as f64).collect::<Vec<_>>());
 
-    let avg_weeks = weeks.iter().mean();
-    let var_weeks = weeks.variance();
+    println!(
+        "Overall Completion: {} - {} weeks (Avg {}) (Trade {:?} to {:?})",
+        weeks.quantile(0.025),
+        weeks.quantile(0.975),
+        weeks.iter().mean(),
+        settings.trading_rule.source,
+        settings.trading_rule.target
+    );
 
-    println!("Avg weeks: {avg_weeks} (var: {var_weeks})");
+    print_per_player(&settings, &samples);
 
     Ok(())
 }
