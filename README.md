@@ -1,5 +1,8 @@
 # Tier Set Acquisition Simulator
 
+Calculates stats about how long it will take to acquire 4pc tier sets for the
+whole raid with different strategies and comps.
+
 ## Usage
 
 1. Install [rust](//rustup.rs)
