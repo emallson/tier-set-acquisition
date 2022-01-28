@@ -41,7 +41,7 @@ struct TradingRule {
 /// with pieces that haven't yet been acquired.
 #[derive(Deserialize, Debug, Copy, Clone)]
 enum TradingSourceRule {
-    NoTrading,
+    OnlyDuplicates,
     Always,
     After2pc,
     After4pc,
@@ -129,7 +129,7 @@ impl State {
         if !self.has[&slot][source] {
             use TradingSourceRule::*;
             match self.trading_rule.source {
-                NoTrading => return None,
+                OnlyDuplicates => return None,
                 Always => {}
                 After2pc => {
                     if num_pieces < 2 {

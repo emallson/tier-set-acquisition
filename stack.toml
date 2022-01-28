@@ -1,10 +1,10 @@
 clears_per_week = 2
 num_samples = 100000
-num_extra_vault_items = 3
+num_extra_vault_items = 6
 
 [trading_rule]
 source = "Always"
-target = "MostPieces"
+target = "LeastPieces"
 
 [members]
 Eisenpelz = "Monk"
