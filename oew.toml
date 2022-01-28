@@ -1,6 +1,6 @@
 clears_per_week = 2
 num_samples = 10000
-num_vault_items = 3
+num_extra_vault_items = 3
 
 [trading_rule]
 source = "After4pc"

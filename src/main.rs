@@ -25,7 +25,7 @@ struct Settings {
     #[serde(flatten)]
     comp: Comp,
     clears_per_week: usize,
-    num_vault_items: usize,
+    num_extra_vault_items: usize,
     trading_rule: TradingRule,
     num_samples: usize,
 }
@@ -96,7 +96,7 @@ struct State {
     trading_rule: TradingRule,
     bonus_chance: Bernoulli,
     /// Chance for a vault slot to be tier for non-raid slots. Raid slots use the raid loot table.
-    vault_chance: Binomial,
+    nonraid_vault_chance: Binomial,
 }
 
 impl State {
@@ -225,7 +225,7 @@ impl State {
                 .collect(),
             num_slots: vec![0; num_players],
             trading_rule: settings.trading_rule.clone(),
-            vault_chance: Binomial::new(0.2, settings.num_vault_items as u64).unwrap(),
+            nonraid_vault_chance: Binomial::new(0.2, settings.num_extra_vault_items as u64).unwrap(),
         }
     }
 
@@ -254,7 +254,7 @@ impl State {
                 })
                 .unwrap();
 
-            let bonus_drops = self.vault_chance.sample(rng).round() as usize;
+            let bonus_drops = self.nonraid_vault_chance.sample(rng).round() as usize;
             let bonus_slots = SLOTS.choose_multiple(rng, bonus_drops);
 
             for &slot in raid_slots.chain(bonus_slots) {
