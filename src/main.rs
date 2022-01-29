@@ -254,7 +254,7 @@ impl State {
     }
 
     fn award_tier<R: Rng>(&mut self, rng: &mut R, slot: Slot, level: TierLevel) {
-        let n = self.num_items(rng);
+        let n = if level == TierLevel::Mythic { 2 } else { self.num_items(rng) };
         let awardees = self
             .comp
             .iter()
