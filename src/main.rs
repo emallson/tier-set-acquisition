@@ -228,7 +228,7 @@ impl State {
 
     /// Calculate vault drops for each raider. Slightly inaccurate first week because it doesn't
     /// model the number of items that you can't get from the final 3 on raid row, only prevents you
-    /// from getting inappropriate tier slots.
+    /// from getting inappropriate tier slots and from getting all 3 vault options on the raid row.
     ///
     /// Also assumes you can get those slots from M+/PvP rows first week, because why would
     /// blizzard be consistent.
@@ -236,7 +236,7 @@ impl State {
         /// number of distinct items you can get from raid
         const RAID_ITEMS: f64 = 42.0;
 
-        let raid_dist = Binomial::new(5.0 / RAID_ITEMS, 3).unwrap();
+        let raid_dist = Binomial::new(5.0 / RAID_ITEMS, if full_raid { 3 } else { 2 }).unwrap();
         for ix in 0..self.comp.len() {
             let n_tier_drops = raid_dist.sample(rng).round() as usize;
             let raid_slots = SLOTS

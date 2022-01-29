@@ -3,7 +3,6 @@ num_samples = 100000
 num_extra_vault_items = 3
 
 [trading_rule]
-source = "Always"
 target = "LeastPieces"
 
 [members]
@@ -26,7 +25,6 @@ Ivan = "Hunter"
 Kap = "Hunter"
 Traltixx = "Hunter"
 Gucci = "Warlock"
-Mesprit = "Warlock"
 Sokchoy = "Priest"
 Kadmix = "Priest"
 Maelz = "Shaman"
