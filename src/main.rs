@@ -1,4 +1,4 @@
-use log::{info, debug, trace};
+use log::debug;
 use rand::distributions::{Bernoulli, Distribution};
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
@@ -25,6 +25,8 @@ struct Settings {
     #[serde(flatten)]
     comp: Comp,
     clears_per_week: Vec<TierLevel>,
+    mythic_kills: Vec<u8>,
+    mythic_first_slot: Slot,
     num_extra_vault_items: usize,
     trading_rule: TradingRule,
     num_samples: usize,
@@ -157,8 +159,8 @@ where
         debug!("All eligible trade targets have {slot:?}. Maximizing ilvl gap");
         for (ix, &target_token) in state.comp.iter().enumerate() {
             if target_token != token || state.has(ix, slot, level) {
-            continue;
-        }
+                continue;
+            }
             let ix_level = state.has[&slot][ix];
             let items = state.num_slots[ix];
 
@@ -227,31 +229,27 @@ impl State {
                 .filter(|&(ix, &target_token)| target_token == token && !self.has(ix, slot, level))
                 .nth(0)
                 .map(|(ix, _)| ix),
-            MostPieces => {
-                trade_to(&self, token, slot, level, |items, target_items| {
-                    let target_items = target_items.unwrap_or(0);
-                    if items > 4 {
-                        Trade::No
-                    } else if items > target_items {
-                        Trade::Yes
-                    } else if items == target_items {
-                        Trade::CoinFlip
-                    } else {
-                        Trade::No
-                    }
-                })
-            }
-            LeastPieces => {
-                trade_to(&self, token, slot, level, |items, target_items| {
-                    if items < target_items.unwrap_or(5) {
-                        Trade::Yes
-                    } else if items == target_items.unwrap_or(5) {
-                        Trade::CoinFlip
-                    } else {
-                        Trade::No
-                    }
-                })
-            }
+            MostPieces => trade_to(&self, token, slot, level, |items, target_items| {
+                let target_items = target_items.unwrap_or(0);
+                if items > 4 {
+                    Trade::No
+                } else if items > target_items {
+                    Trade::Yes
+                } else if items == target_items {
+                    Trade::CoinFlip
+                } else {
+                    Trade::No
+                }
+            }),
+            LeastPieces => trade_to(&self, token, slot, level, |items, target_items| {
+                if items < target_items.unwrap_or(5) {
+                    Trade::Yes
+                } else if items == target_items.unwrap_or(5) {
+                    Trade::CoinFlip
+                } else {
+                    Trade::No
+                }
+            }),
         }
     }
 
@@ -352,7 +350,7 @@ struct Sample {
 }
 
 fn sample_completion_time(settings: &Settings) -> Sample {
-    let mut weeks = 0;
+    let mut weeks = 0u8;
     let mut state = State::from_settings(settings);
     let mut rng = rand::thread_rng();
 
@@ -373,6 +371,32 @@ fn sample_completion_time(settings: &Settings) -> Sample {
             if weeks > 1 {
                 state.award_tier(&mut rng, Slot::Shoulders, level);
                 state.award_tier(&mut rng, Slot::Chest, level);
+            }
+        }
+
+        if weeks > 1 {
+            let mythic_bosses = settings
+                .mythic_kills
+                .get((weeks - 1) as usize)
+                .or(settings.mythic_kills.last())
+                .cloned()
+                .unwrap_or(0);
+
+            if mythic_bosses >= 10 {
+                state.award_tier(&mut rng, Slot::Chest, TierLevel::Mythic);
+            }
+            if mythic_bosses >= 9 {
+                state.award_tier(&mut rng, Slot::Shoulders, TierLevel::Mythic);
+            }
+            if mythic_bosses >= 8 {
+                state.award_tier(&mut rng, Slot::Helm, TierLevel::Mythic);
+            }
+            // special handling for the first 7 because you could go gloves *or* legs first
+            if mythic_bosses >= 7 {
+                state.award_tier(&mut rng, Slot::Legs, TierLevel::Mythic);
+                state.award_tier(&mut rng, Slot::Gloves, TierLevel::Mythic);
+            } else if mythic_bosses >= 4 {
+                state.award_tier(&mut rng, settings.mythic_first_slot, TierLevel::Mythic);
             }
         }
 
