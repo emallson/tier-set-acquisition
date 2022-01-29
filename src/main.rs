@@ -135,8 +135,9 @@ impl State {
             return None;
         }
 
-        // okay, so we're trading
+        let mut rng = rand::thread_rng();
 
+        // okay, so we're trading
         use TradingTargetRule::*;
         match self.trading_rule.target {
             Arbitrary => self
@@ -149,12 +150,12 @@ impl State {
             MostPieces => {
                 let mut target = None;
                 let mut target_items = None;
-                for (ix, &tcls) in self.comp.iter().enumerate() {
-                    if tcls != token || self.has[&slot][ix] {
+                for (ix, &target_token) in self.comp.iter().enumerate() {
+                    if target_token != token || self.has[&slot][ix] {
                         continue;
                     }
                     let items = self.num_slots[ix];
-                    if items < 4 && items > target_items.unwrap_or(0) {
+                    if items < 4 && (items > target_items.unwrap_or(0) || items == target_items.unwrap_or(0) && rng.gen_bool(0.5)){
                         target = Some(ix);
                         target_items = Some(items);
                     }
@@ -163,7 +164,6 @@ impl State {
                 target
             }
             LeastPieces => {
-                // FIXME: copypasta
                 let mut target = None;
                 let mut target_items = None;
                 for (ix, &target_token) in self.comp.iter().enumerate() {
@@ -171,7 +171,7 @@ impl State {
                         continue;
                     }
                     let items = self.num_slots[ix];
-                    if items < target_items.unwrap_or(5) {
+                    if items < target_items.unwrap_or(5) || items == target_items.unwrap_or(5) && rng.gen_bool(0.5) {
                         target = Some(ix);
                         target_items = Some(items);
                     }
