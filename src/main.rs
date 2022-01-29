@@ -32,20 +32,7 @@ struct Settings {
 
 #[derive(Debug, Deserialize, Clone)]
 struct TradingRule {
-    source: TradingSourceRule,
     target: TradingTargetRule,
-}
-
-/// The rule for trading tier to other players of the same class. Loot that has already been
-/// acquired will always be traded if it has already been acquired---this determines what to do
-/// with pieces that haven't yet been acquired.
-#[derive(Deserialize, Debug, Copy, Clone)]
-enum TradingSourceRule {
-    OnlyDuplicates,
-    Always,
-    After2pc,
-    After4pc,
-    After5pc,
 }
 
 #[derive(Deserialize, Debug, Copy, Clone)]
@@ -142,29 +129,10 @@ impl State {
     }
 
     fn trade_item(&self, source: usize, slot: Slot, token: Token) -> Option<usize> {
-        let num_pieces = self.num_slots[source];
-
         if !self.has[&slot][source] {
-            use TradingSourceRule::*;
-            match self.trading_rule.source {
-                OnlyDuplicates => return None,
-                Always => {}
-                After2pc => {
-                    if num_pieces < 2 {
-                        return None;
-                    }
-                }
-                After4pc => {
-                    if num_pieces < 4 {
-                        return None;
-                    }
-                }
-                After5pc => {
-                    if num_pieces < 5 {
-                        return None;
-                    }
-                }
-            }
+            // per comments from Lore, we can't trade items that we don't have. this means that if
+            // we just got a helm, we can't trade it even if we have same ilvl helm from M+
+            return None;
         }
 
         // okay, so we're trading
@@ -392,11 +360,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut weeks = Data::new(samples.iter().map(|s| s.n_weeks as f64).collect::<Vec<_>>());
 
     println!(
-        "Overall Completion: {} - {} weeks (Avg {}) (Trade {:?} to {:?})",
+        "Overall Completion: {} - {} weeks (Avg {}) (Trade to {:?})",
         weeks.quantile(0.025),
         weeks.quantile(0.975),
         weeks.iter().mean(),
-        settings.trading_rule.source,
         settings.trading_rule.target
     );
 
