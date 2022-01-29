@@ -361,6 +361,11 @@ fn sample_completion_time(settings: &Settings) -> Sample {
 
     loop {
         weeks += 1;
+
+        if weeks > 1 {
+            state.award_vault(&mut rng, weeks > 1);
+        }
+
         for &level in &settings.clears_per_week {
             state.award_tier(&mut rng, Slot::Helm, level);
             state.award_tier(&mut rng, Slot::Legs, level);
@@ -371,7 +376,6 @@ fn sample_completion_time(settings: &Settings) -> Sample {
             }
         }
 
-        state.award_vault(&mut rng, weeks > 1);
         state.mark_completion_dates(weeks);
 
         pct_2pc.push(state.completion_pct(2));
