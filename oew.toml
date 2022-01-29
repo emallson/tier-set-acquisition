@@ -1,4 +1,4 @@
-clears_per_week = 2
+clears_per_week = ["Normal", "Heroic"]
 num_samples = 100000
 num_extra_vault_items = 3
 

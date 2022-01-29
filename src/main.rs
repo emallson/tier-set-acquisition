@@ -1,3 +1,4 @@
+use log::{info, debug, trace};
 use rand::distributions::{Bernoulli, Distribution};
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
@@ -79,7 +80,7 @@ impl Class {
         match self {
             DemonHunter | Paladin | Priest | Warlock => Token::Conqueror,
             DeathKnight | Druid | Mage | Rogue => Token::Vanquisher,
-            Hunter | Monk | Shaman | Warrior => Token::Protector
+            Hunter | Monk | Shaman | Warrior => Token::Protector,
         }
     }
 }
@@ -113,6 +114,67 @@ struct State {
     nonraid_vault_chance: Binomial,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Trade {
+    Yes,
+    No,
+    CoinFlip,
+}
+
+fn trade_to<F>(
+    state: &State,
+    token: Token,
+    slot: Slot,
+    level: TierLevel,
+    condition: F,
+) -> Option<usize>
+where
+    F: Fn(u8, Option<u8>) -> Trade,
+{
+    let mut rng = rand::thread_rng();
+    let mut target = None;
+    let mut target_items = None;
+    let mut target_level = None;
+
+    debug!("Searching for trade target for {level:?} {slot:?}");
+
+    // Give it to the person with the `condition` pieces among those without it.
+    for (ix, &target_token) in state.comp.iter().enumerate() {
+        if target_token != token || state.has(ix, slot, TierLevel::AnyLevel) {
+            continue;
+        }
+        let items = state.num_slots[ix];
+
+        let trade = condition(items, target_items);
+        if trade == Trade::Yes || trade == Trade::CoinFlip && rng.gen_bool(0.5) {
+            target = Some(ix);
+            target_items = Some(items);
+        }
+    }
+
+    // if everyone has it, give it to the person with the lowest ilvl of it
+    if target.is_none() {
+        debug!("All eligible trade targets have {slot:?}. Maximizing ilvl gap");
+        for (ix, &target_token) in state.comp.iter().enumerate() {
+            if target_token != token || state.has(ix, slot, level) {
+            continue;
+        }
+            let ix_level = state.has[&slot][ix];
+            let items = state.num_slots[ix];
+
+            if ix_level < target_level || ix_level == target_level && rng.gen_bool(0.5) {
+                target = Some(ix);
+                target_level = ix_level;
+                target_items = Some(items);
+            }
+        }
+    }
+
+    debug!("Trading {level:?} {slot:?} to {target:?}, who has {target_level:?} (items: {target_items:?})");
+
+    target
+}
+
 impl State {
     fn num_items<R: Rng>(&self, rng: &mut R) -> usize {
         let base = self.comp.len() / 10;
@@ -122,7 +184,9 @@ impl State {
     }
 
     fn has(&self, ix: usize, slot: Slot, level: TierLevel) -> bool {
-        self.has[&slot][ix].map(|target| target >= level).unwrap_or(false)
+        self.has[&slot][ix]
+            .map(|target| target >= level)
+            .unwrap_or(false)
     }
 
     fn store_tier(&mut self, ix: usize, slot: Slot, level: TierLevel) {
@@ -140,14 +204,18 @@ impl State {
         }
     }
 
-    fn trade_item(&self, source: usize, slot: Slot, token: Token, level: TierLevel) -> Option<usize> {
+    fn trade_item(
+        &self,
+        source: usize,
+        slot: Slot,
+        token: Token,
+        level: TierLevel,
+    ) -> Option<usize> {
         if !self.has(source, slot, level) {
             // per comments from Lore, we can't trade items that we don't have. this means that if
             // we just got a helm, we can't trade it even if we have same ilvl helm from M+
             return None;
         }
-
-        let mut rng = rand::thread_rng();
 
         // okay, so we're trading
         use TradingTargetRule::*;
@@ -160,36 +228,29 @@ impl State {
                 .nth(0)
                 .map(|(ix, _)| ix),
             MostPieces => {
-                let mut target = None;
-                let mut target_items = None;
-                for (ix, &target_token) in self.comp.iter().enumerate() {
-                    if target_token != token || self.has(ix, slot, level) {
-                        continue;
+                trade_to(&self, token, slot, level, |items, target_items| {
+                    let target_items = target_items.unwrap_or(0);
+                    if items > 4 {
+                        Trade::No
+                    } else if items > target_items {
+                        Trade::Yes
+                    } else if items == target_items {
+                        Trade::CoinFlip
+                    } else {
+                        Trade::No
                     }
-                    let items = self.num_slots[ix];
-                    if items < 4 && (items > target_items.unwrap_or(0) || items == target_items.unwrap_or(0) && rng.gen_bool(0.5)){
-                        target = Some(ix);
-                        target_items = Some(items);
-                    }
-                }
-
-                target
+                })
             }
             LeastPieces => {
-                let mut target = None;
-                let mut target_items = None;
-                for (ix, &target_token) in self.comp.iter().enumerate() {
-                    if target_token != token || self.has(ix, slot, level) {
-                        continue;
+                trade_to(&self, token, slot, level, |items, target_items| {
+                    if items < target_items.unwrap_or(5) {
+                        Trade::Yes
+                    } else if items == target_items.unwrap_or(5) {
+                        Trade::CoinFlip
+                    } else {
+                        Trade::No
                     }
-                    let items = self.num_slots[ix];
-                    if items < target_items.unwrap_or(5) || items == target_items.unwrap_or(5) && rng.gen_bool(0.5) {
-                        target = Some(ix);
-                        target_items = Some(items);
-                    }
-                }
-
-                target
+                })
             }
         }
     }
@@ -218,7 +279,13 @@ impl State {
     }
 
     fn from_settings(settings: &Settings) -> State {
-        let comp = settings.comp.members.values().cloned().map(Class::into_token).collect::<Vec<_>>();
+        let comp = settings
+            .comp
+            .members
+            .values()
+            .cloned()
+            .map(Class::into_token)
+            .collect::<Vec<_>>();
         let num_players = comp.len();
         let slots = vec![None; num_players];
 
@@ -356,6 +423,8 @@ fn print_per_player(settings: &Settings, samples: &[Sample]) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    femme::start();
+
     let opts = Opts::from_args();
     let settings_raw = std::fs::read(&opts.config)?;
     let settings = toml::from_slice::<Settings>(&settings_raw)?;
