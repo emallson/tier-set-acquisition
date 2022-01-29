@@ -172,7 +172,7 @@ where
         }
     }
 
-    debug!("Trading {level:?} {slot:?} to {target:?}, who has {target_level:?} (items: {target_items:?})");
+    debug!("Trading {level:?} {token:?} {slot:?} to {target:?}, who has {target_level:?} (items: {target_items:?})");
 
     target
 }
@@ -360,6 +360,8 @@ fn sample_completion_time(settings: &Settings) -> Sample {
     loop {
         weeks += 1;
 
+        debug!("Processing week {weeks}");
+
         if weeks > 1 {
             state.award_vault(&mut rng, weeks > 1);
         }
@@ -451,7 +453,7 @@ fn print_per_player(settings: &Settings, samples: &[Sample]) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    femme::start();
+    femme::with_level(femme::LevelFilter::Info);
 
     let opts = Opts::from_args();
     let settings_raw = std::fs::read(&opts.config)?;
