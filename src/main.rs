@@ -108,6 +108,7 @@ const SLOTS: [Slot; 5] = [
 
 #[derive(Debug)]
 struct State {
+    record_waste: bool,
     comp: Vec<Token>,
     has: BTreeMap<Slot, Vec<Option<TierLevel>>>,
     num_slots: Vec<u8>,
@@ -288,7 +289,7 @@ impl State {
                 self.store_tier(ix, slot, level)
             };
 
-            if !not_wasted {
+            if !not_wasted && self.record_waste {
                 self.wasted_drops += 1;
             }
         }
@@ -311,6 +312,7 @@ impl State {
         let slots = vec![None; num_players];
 
         State {
+            record_waste: true,
             comp,
             bonus_chance: Bernoulli::from_ratio((num_players % 10) as u32, 10).unwrap(),
             has: SLOTS
@@ -381,8 +383,8 @@ impl State {
                 }
             }
 
-            if !loot_taken && loot_options {
-                debug!("Vault for {ix} wasted");
+            if !loot_taken && loot_options && self.record_waste {
+                debug!("Vault for {ix} WASTED");
                 self.wasted_vaults += 1;
             }
         }
@@ -411,6 +413,10 @@ fn sample_completion_time(settings: &Settings) -> Sample {
         weeks += 1;
 
         debug!("Processing week {weeks}");
+
+        if weeks > 4 {
+            state.record_waste = false;
+        }
 
         if weeks > 1 {
             state.award_vault(&mut rng, weeks > 2);
