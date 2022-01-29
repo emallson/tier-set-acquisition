@@ -13,6 +13,8 @@ use structopt::StructOpt;
 struct Opts {
     config: String,
     output: String,
+    #[structopt(long)]
+    debug: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +114,8 @@ struct State {
     completion_week: Vec<Option<u8>>,
     trading_rule: TradingRule,
     bonus_chance: Bernoulli,
+    wasted_vaults: usize,
+    wasted_drops: usize,
     /// Chance for a vault slot to be tier for non-raid slots. Raid slots use the raid loot table.
     nonraid_vault_chance: Binomial,
 }
@@ -131,7 +135,7 @@ fn trade_to<F>(
     condition: F,
 ) -> Option<usize>
 where
-    F: Fn(u8, Option<u8>) -> Trade,
+    F: Fn(u8, u8) -> Trade,
 {
     let mut rng = rand::thread_rng();
     let mut target = None;
@@ -147,7 +151,13 @@ where
         }
         let items = state.num_slots[ix];
 
-        let trade = condition(items, target_items);
+        if target.is_none() {
+            target = Some(ix);
+            target_items = Some(items);
+            continue;
+        }
+
+        let trade = condition(items, target_items.unwrap());
         if trade == Trade::Yes || trade == Trade::CoinFlip && rng.gen_bool(0.5) {
             target = Some(ix);
             target_items = Some(items);
@@ -158,16 +168,21 @@ where
     if target.is_none() {
         debug!("All eligible trade targets have {slot:?}. Maximizing ilvl gap");
         for (ix, &target_token) in state.comp.iter().enumerate() {
-            if target_token != token || state.has(ix, slot, level) {
+            if target_token != token { continue; }
+            if state.has(ix, slot, level) {
+                debug!("Not trading to {ix}. They have at least{level:?} in {slot:?}.");
                 continue;
             }
             let ix_level = state.has[&slot][ix];
             let items = state.num_slots[ix];
 
-            if ix_level < target_level || ix_level == target_level && rng.gen_bool(0.5) {
+            if target.is_none() || ix_level < target_level || ix_level == target_level && rng.gen_bool(0.5) {
+                debug!("Marking {ix} for possible trade. They have {ix_level:?} in {slot:?}.");
                 target = Some(ix);
                 target_level = ix_level;
                 target_items = Some(items);
+            } else {
+                debug!("Not trading to {ix}. They have {ix_level:?} in {slot:?}.");
             }
         }
     }
@@ -191,10 +206,15 @@ impl State {
             .unwrap_or(false)
     }
 
-    fn store_tier(&mut self, ix: usize, slot: Slot, level: TierLevel) {
+    fn store_tier(&mut self, ix: usize, slot: Slot, level: TierLevel) -> bool {
         if !self.has(ix, slot, level) {
             self.has.get_mut(&slot).unwrap()[ix] = Some(level);
             self.num_slots[ix] += 1;
+            debug!("Item {level:?} {slot:?} awarded to {ix}");
+            true
+        } else {
+            debug!("Drop {level:?} {slot:?} awarded to {ix} WASTED");
+            false
         }
     }
 
@@ -230,7 +250,6 @@ impl State {
                 .nth(0)
                 .map(|(ix, _)| ix),
             MostPieces => trade_to(&self, token, slot, level, |items, target_items| {
-                let target_items = target_items.unwrap_or(0);
                 if items > 4 {
                     Trade::No
                 } else if items > target_items {
@@ -242,9 +261,9 @@ impl State {
                 }
             }),
             LeastPieces => trade_to(&self, token, slot, level, |items, target_items| {
-                if items < target_items.unwrap_or(5) {
+                if items < target_items {
                     Trade::Yes
-                } else if items == target_items.unwrap_or(5) {
+                } else if items == target_items {
                     Trade::CoinFlip
                 } else {
                     Trade::No
@@ -263,10 +282,14 @@ impl State {
             .choose_multiple(rng, n);
 
         for (ix, token) in awardees {
-            if let Some(other) = self.trade_item(ix, slot, token, level) {
-                self.store_tier(other, slot, level);
+            let not_wasted = if let Some(other) = self.trade_item(ix, slot, token, level) {
+                self.store_tier(other, slot, level)
             } else {
-                self.store_tier(ix, slot, level);
+                self.store_tier(ix, slot, level)
+            };
+
+            if !not_wasted {
+                self.wasted_drops += 1;
             }
         }
     }
@@ -300,6 +323,8 @@ impl State {
             trading_rule: settings.trading_rule.clone(),
             nonraid_vault_chance: Binomial::new(0.2, settings.num_extra_vault_items as u64)
                 .unwrap(),
+            wasted_drops: 0,
+            wasted_vaults: 0,
         }
     }
 
@@ -312,6 +337,8 @@ impl State {
     fn award_vault<R: Rng>(&mut self, rng: &mut R, full_raid: bool) {
         /// number of distinct items you can get from raid
         const RAID_ITEMS: f64 = 42.0;
+
+        debug!("Awarding vault items (full raid?: {full_raid})");
 
         let raid_dist = Binomial::new(5.0 / RAID_ITEMS, if full_raid { 3 } else { 2 }).unwrap();
         for ix in 0..self.comp.len() {
@@ -331,11 +358,32 @@ impl State {
             let bonus_drops = self.nonraid_vault_chance.sample(rng).round() as usize;
             let bonus_slots = SLOTS.choose_multiple(rng, bonus_drops);
 
-            for &slot in raid_slots.chain(bonus_slots) {
-                if !self.has(ix, slot, TierLevel::Heroic) {
-                    self.store_tier(ix, slot, TierLevel::Heroic);
+            let mut loot_taken = false;
+            let mut loot_options = false;
+            let bonus_level = if full_raid { TierLevel::Mythic } else { TierLevel::Heroic };
+            for &slot in bonus_slots {
+                loot_options = true;
+                if !self.has(ix, slot, bonus_level) {
+                    self.store_tier(ix, slot, bonus_level);
+                    loot_taken = true;
                     break;
                 }
+            }
+
+            if !loot_taken {
+                for &slot in raid_slots {
+                    loot_options = true;
+                    if !self.has(ix, slot, TierLevel::Heroic) {
+                        self.store_tier(ix, slot, TierLevel::Heroic);
+                        loot_taken = true;
+                        break;
+                    }
+                }
+            }
+
+            if !loot_taken && loot_options {
+                debug!("Vault for {ix} wasted");
+                self.wasted_vaults += 1;
             }
         }
     }
@@ -347,6 +395,8 @@ struct Sample {
     n_weeks: u8,
     pct_2pc: Vec<f64>,
     pct_4pc: Vec<f64>,
+    wasted_vaults: usize,
+    wasted_drops: usize,
 }
 
 fn sample_completion_time(settings: &Settings) -> Sample {
@@ -363,10 +413,11 @@ fn sample_completion_time(settings: &Settings) -> Sample {
         debug!("Processing week {weeks}");
 
         if weeks > 1 {
-            state.award_vault(&mut rng, weeks > 1);
+            state.award_vault(&mut rng, weeks > 2);
         }
 
         for &level in &settings.clears_per_week {
+            debug!("Awarding drops for {level:?}");
             state.award_tier(&mut rng, Slot::Helm, level);
             state.award_tier(&mut rng, Slot::Legs, level);
             state.award_tier(&mut rng, Slot::Gloves, level);
@@ -377,6 +428,7 @@ fn sample_completion_time(settings: &Settings) -> Sample {
         }
 
         if weeks > 1 {
+            debug!("Awarding drops for Mythic");
             let mythic_bosses = settings
                 .mythic_kills
                 .get((weeks - 1) as usize)
@@ -415,6 +467,8 @@ fn sample_completion_time(settings: &Settings) -> Sample {
     }
 
     Sample {
+        wasted_vaults: state.wasted_vaults,
+        wasted_drops: state.wasted_drops,
         completion_weeks: state
             .completion_week
             .into_iter()
@@ -453,15 +507,16 @@ fn print_per_player(settings: &Settings, samples: &[Sample]) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    femme::with_level(femme::LevelFilter::Info);
-
     let opts = Opts::from_args();
+
+    femme::with_level(if opts.debug { femme::LevelFilter::Debug } else { femme::LevelFilter::Info });
     let settings_raw = std::fs::read(&opts.config)?;
     let settings = toml::from_slice::<Settings>(&settings_raw)?;
+    let num_samples = if opts.debug { 1 } else { settings.num_samples };
 
-    let mut samples = Vec::with_capacity(settings.num_samples);
+    let mut samples = Vec::with_capacity(num_samples);
 
-    (0..settings.num_samples)
+    (0..num_samples)
         .into_par_iter()
         .map(|_ix| sample_completion_time(&settings))
         .collect_into_vec(&mut samples);
@@ -469,9 +524,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(&opts.output, serde_json::to_vec(&samples)?)?;
 
     let mut weeks = Data::new(samples.iter().map(|s| s.n_weeks as f64).collect::<Vec<_>>());
+    let wasted_vaults = samples.iter().map(|s| s.wasted_vaults as f64).mean();
+    let wasted_drops = samples.iter().map(|s| s.wasted_drops as f64).mean();
 
     println!(
-        "Overall Completion: {} - {} weeks (Avg {}) (Trade to {:?})",
+        "Overall Completion: {} - {} weeks (Avg {}) (Trade to {:?}) (Avg Wasted Vaults: {wasted_vaults}, Avg Wasted Drops: {wasted_drops})",
         weeks.quantile(0.025),
         weeks.quantile(0.975),
         weeks.iter().mean(),
