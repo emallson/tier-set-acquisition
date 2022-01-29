@@ -71,6 +71,24 @@ enum Class {
     Warrior,
 }
 
+#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
+enum Token {
+    Conqueror,
+    Vanquisher,
+    Protector,
+}
+
+impl Class {
+    fn into_token(self) -> Token {
+        use Class::*;
+        match self {
+            DemonHunter | Paladin | Priest | Warlock => Token::Conqueror,
+            DeathKnight | Druid | Mage | Rogue => Token::Vanquisher,
+            Hunter | Monk | Shaman | Warrior => Token::Protector
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Copy, Clone, Ord, PartialEq, PartialOrd, Eq)]
 enum Slot {
     Helm,
@@ -90,7 +108,7 @@ const SLOTS: [Slot; 5] = [
 
 #[derive(Debug)]
 struct State {
-    comp: Vec<Class>,
+    comp: Vec<Token>,
     has: BTreeMap<Slot, BitArray>,
     num_slots: Vec<u8>,
     completion_week: Vec<Option<u8>>,
@@ -123,7 +141,7 @@ impl State {
         }
     }
 
-    fn trade_item(&self, source: usize, slot: Slot, cls: Class) -> Option<usize> {
+    fn trade_item(&self, source: usize, slot: Slot, token: Token) -> Option<usize> {
         let num_pieces = self.num_slots[source];
 
         if !self.has[&slot][source] {
@@ -157,14 +175,14 @@ impl State {
                 .comp
                 .iter()
                 .enumerate()
-                .filter(|&(ix, &tcls)| tcls == cls && !self.has[&slot][ix])
+                .filter(|&(ix, &target_token)| target_token == token && !self.has[&slot][ix])
                 .nth(0)
                 .map(|(ix, _)| ix),
             MostPieces => {
                 let mut target = None;
                 let mut target_items = None;
                 for (ix, &tcls) in self.comp.iter().enumerate() {
-                    if tcls != cls || self.has[&slot][ix] {
+                    if tcls != token || self.has[&slot][ix] {
                         continue;
                     }
                     let items = self.num_slots[ix];
@@ -180,8 +198,8 @@ impl State {
                 // FIXME: copypasta
                 let mut target = None;
                 let mut target_items = None;
-                for (ix, &tcls) in self.comp.iter().enumerate() {
-                    if tcls != cls || self.has[&slot][ix] {
+                for (ix, &target_token) in self.comp.iter().enumerate() {
+                    if target_token != token || self.has[&slot][ix] {
                         continue;
                     }
                     let items = self.num_slots[ix];
@@ -205,8 +223,8 @@ impl State {
             .enumerate()
             .choose_multiple(rng, n);
 
-        for (ix, cls) in awardees {
-            if let Some(other) = self.trade_item(ix, slot, cls) {
+        for (ix, token) in awardees {
+            if let Some(other) = self.trade_item(ix, slot, token) {
                 self.store_tier(other, slot);
             } else {
                 self.store_tier(ix, slot);
@@ -220,7 +238,7 @@ impl State {
     }
 
     fn from_settings(settings: &Settings) -> State {
-        let comp = settings.comp.members.values().cloned().collect::<Vec<_>>();
+        let comp = settings.comp.members.values().cloned().map(Class::into_token).collect::<Vec<_>>();
         let num_players = comp.len();
         let slots = bitarr![0; 30];
 
