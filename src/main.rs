@@ -107,7 +107,7 @@ struct State {
 
 impl State {
     fn num_items<R: Rng>(&self, rng: &mut R) -> usize {
-        let base = self.comp.len() / 5;
+        let base = self.comp.len() / 10;
         let bonus = self.bonus_chance.sample(rng);
 
         base + bonus as usize
@@ -212,7 +212,7 @@ impl State {
 
         State {
             comp,
-            bonus_chance: Bernoulli::from_ratio((num_players % 5) as u32, 5).unwrap(),
+            bonus_chance: Bernoulli::from_ratio((num_players % 10) as u32, 10).unwrap(),
             has: SLOTS
                 .iter()
                 .cloned()
