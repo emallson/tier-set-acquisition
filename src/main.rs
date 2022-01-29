@@ -1,4 +1,3 @@
-use bitvec::prelude::*;
 use rand::distributions::{Bernoulli, Distribution};
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
@@ -24,7 +23,7 @@ struct Comp {
 struct Settings {
     #[serde(flatten)]
     comp: Comp,
-    clears_per_week: usize,
+    clears_per_week: Vec<TierLevel>,
     num_extra_vault_items: usize,
     trading_rule: TradingRule,
     num_samples: usize,
@@ -40,6 +39,15 @@ enum TradingTargetRule {
     MostPieces,
     LeastPieces,
     Arbitrary,
+}
+
+#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum TierLevel {
+    AnyLevel,
+    Lfr,
+    Normal,
+    Heroic,
+    Mythic,
 }
 
 #[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
@@ -96,7 +104,7 @@ const SLOTS: [Slot; 5] = [
 #[derive(Debug)]
 struct State {
     comp: Vec<Token>,
-    has: BTreeMap<Slot, BitArray>,
+    has: BTreeMap<Slot, Vec<Option<TierLevel>>>,
     num_slots: Vec<u8>,
     completion_week: Vec<Option<u8>>,
     trading_rule: TradingRule,
@@ -113,9 +121,13 @@ impl State {
         base + bonus as usize
     }
 
-    fn store_tier(&mut self, ix: usize, slot: Slot) {
-        if !self.has[&slot][ix] {
-            self.has.get_mut(&slot).unwrap().set(ix, true);
+    fn has(&self, ix: usize, slot: Slot, level: TierLevel) -> bool {
+        self.has[&slot][ix].map(|target| target >= level).unwrap_or(false)
+    }
+
+    fn store_tier(&mut self, ix: usize, slot: Slot, level: TierLevel) {
+        if !self.has(ix, slot, level) {
+            self.has.get_mut(&slot).unwrap()[ix] = Some(level);
             self.num_slots[ix] += 1;
         }
     }
@@ -128,8 +140,8 @@ impl State {
         }
     }
 
-    fn trade_item(&self, source: usize, slot: Slot, token: Token) -> Option<usize> {
-        if !self.has[&slot][source] {
+    fn trade_item(&self, source: usize, slot: Slot, token: Token, level: TierLevel) -> Option<usize> {
+        if !self.has(source, slot, level) {
             // per comments from Lore, we can't trade items that we don't have. this means that if
             // we just got a helm, we can't trade it even if we have same ilvl helm from M+
             return None;
@@ -144,14 +156,14 @@ impl State {
                 .comp
                 .iter()
                 .enumerate()
-                .filter(|&(ix, &target_token)| target_token == token && !self.has[&slot][ix])
+                .filter(|&(ix, &target_token)| target_token == token && !self.has(ix, slot, level))
                 .nth(0)
                 .map(|(ix, _)| ix),
             MostPieces => {
                 let mut target = None;
                 let mut target_items = None;
                 for (ix, &target_token) in self.comp.iter().enumerate() {
-                    if target_token != token || self.has[&slot][ix] {
+                    if target_token != token || self.has(ix, slot, level) {
                         continue;
                     }
                     let items = self.num_slots[ix];
@@ -167,7 +179,7 @@ impl State {
                 let mut target = None;
                 let mut target_items = None;
                 for (ix, &target_token) in self.comp.iter().enumerate() {
-                    if target_token != token || self.has[&slot][ix] {
+                    if target_token != token || self.has(ix, slot, level) {
                         continue;
                     }
                     let items = self.num_slots[ix];
@@ -182,7 +194,7 @@ impl State {
         }
     }
 
-    fn award_tier<R: Rng>(&mut self, rng: &mut R, slot: Slot) {
+    fn award_tier<R: Rng>(&mut self, rng: &mut R, slot: Slot, level: TierLevel) {
         let n = self.num_items(rng);
         let awardees = self
             .comp
@@ -192,10 +204,10 @@ impl State {
             .choose_multiple(rng, n);
 
         for (ix, token) in awardees {
-            if let Some(other) = self.trade_item(ix, slot, token) {
-                self.store_tier(other, slot);
+            if let Some(other) = self.trade_item(ix, slot, token, level) {
+                self.store_tier(other, slot, level);
             } else {
-                self.store_tier(ix, slot);
+                self.store_tier(ix, slot, level);
             }
         }
     }
@@ -208,7 +220,7 @@ impl State {
     fn from_settings(settings: &Settings) -> State {
         let comp = settings.comp.members.values().cloned().map(Class::into_token).collect::<Vec<_>>();
         let num_players = comp.len();
-        let slots = bitarr![0; 30];
+        let slots = vec![None; num_players];
 
         State {
             comp,
@@ -255,8 +267,8 @@ impl State {
             let bonus_slots = SLOTS.choose_multiple(rng, bonus_drops);
 
             for &slot in raid_slots.chain(bonus_slots) {
-                if !self.has[&slot][ix] {
-                    self.store_tier(ix, slot);
+                if !self.has(ix, slot, TierLevel::Heroic) {
+                    self.store_tier(ix, slot, TierLevel::Heroic);
                     break;
                 }
             }
@@ -282,13 +294,13 @@ fn sample_completion_time(settings: &Settings) -> Sample {
 
     loop {
         weeks += 1;
-        for _ in 0..settings.clears_per_week {
-            state.award_tier(&mut rng, Slot::Helm);
-            state.award_tier(&mut rng, Slot::Legs);
-            state.award_tier(&mut rng, Slot::Gloves);
+        for &level in &settings.clears_per_week {
+            state.award_tier(&mut rng, Slot::Helm, level);
+            state.award_tier(&mut rng, Slot::Legs, level);
+            state.award_tier(&mut rng, Slot::Gloves, level);
             if weeks > 1 {
-                state.award_tier(&mut rng, Slot::Shoulders);
-                state.award_tier(&mut rng, Slot::Chest);
+                state.award_tier(&mut rng, Slot::Shoulders, level);
+                state.award_tier(&mut rng, Slot::Chest, level);
             }
         }
 
