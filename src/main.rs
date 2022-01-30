@@ -17,12 +17,12 @@ struct Opts {
     debug: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Comp {
     members: HashMap<String, Class>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Settings {
     #[serde(flatten)]
     comp: Comp,
@@ -34,19 +34,21 @@ struct Settings {
     num_samples: usize,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 struct TradingRule {
     target: TradingTargetRule,
 }
 
-#[derive(Deserialize, Debug, Copy, Clone)]
+#[derive(Deserialize, Debug, Copy, Clone, Serialize)]
 enum TradingTargetRule {
     MostPieces,
     LeastPieces,
     Arbitrary,
+    MostSetCompletionsMostPieces,
+    MostSetCompletionsLeastPieces,
 }
 
-#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 enum TierLevel {
     AnyLevel,
     Lfr,
@@ -55,7 +57,7 @@ enum TierLevel {
     Mythic,
 }
 
-#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 enum Class {
     DeathKnight,
     DemonHunter,
@@ -71,7 +73,7 @@ enum Class {
     Warrior,
 }
 
-#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 enum Token {
     Conqueror,
     Vanquisher,
@@ -89,7 +91,7 @@ impl Class {
     }
 }
 
-#[derive(Deserialize, Debug, Copy, Clone, Ord, PartialEq, PartialOrd, Eq)]
+#[derive(Deserialize, Debug, Copy, Clone, Ord, PartialEq, PartialOrd, Eq, Serialize)]
 enum Slot {
     Helm,
     Shoulders,
@@ -209,8 +211,12 @@ impl State {
 
     fn store_tier(&mut self, ix: usize, slot: Slot, level: TierLevel) -> bool {
         if !self.has(ix, slot, level) {
-            self.has.get_mut(&slot).unwrap()[ix] = Some(level);
-            self.num_slots[ix] += 1;
+            let v = self.has.get_mut(&slot).unwrap();
+            let old = v[ix];
+            v[ix] = Some(level);
+            if old.is_none() {
+                self.num_slots[ix] += 1;
+            }
             debug!("Item {level:?} {slot:?} awarded to {ix}");
             true
         } else {
@@ -250,6 +256,29 @@ impl State {
                 .filter(|&(ix, &target_token)| target_token == token && !self.has(ix, slot, level))
                 .nth(0)
                 .map(|(ix, _)| ix),
+            MostSetCompletionsMostPieces => trade_to(&self, token, slot, level, |items, target_items| {
+                if items == target_items {
+                    // randomize equal options to break ordering dependency in results
+                    Trade::CoinFlip
+                } else if target_items == 3 {
+                    // if the current target would get a 4pc, don't switch
+                    Trade::No
+                } else if target_items == 1 && items != 3 {
+                    // if the current target would get a 2pc and the new target would not get a
+                    // 4pc, don't switch
+                    Trade::No
+                } else if items == 3 || items == 1 {
+                    // otherwise complete a set
+                    Trade::Yes
+                } else if items > 4 {
+                    // don't give out 5pc
+                    Trade::No
+                } else if items > target_items {
+                    Trade::Yes
+                } else {
+                    Trade::No
+                }
+            }),
             MostPieces => trade_to(&self, token, slot, level, |items, target_items| {
                 if items > 4 {
                     Trade::No
@@ -257,6 +286,26 @@ impl State {
                     Trade::Yes
                 } else if items == target_items {
                     Trade::CoinFlip
+                } else {
+                    Trade::No
+                }
+            }),
+            MostSetCompletionsLeastPieces => trade_to(&self, token, slot, level, |items, target_items| {
+                if items == target_items {
+                    // randomize equal options to break ordering dependency in results
+                    Trade::CoinFlip
+                } else if target_items == 3 {
+                    // if the current target would get a 4pc, don't switch
+                    Trade::No
+                } else if target_items == 1 && items != 3 {
+                    // if the current target would get a 2pc and the new target would not get a
+                    // 4pc, don't switch
+                    Trade::No
+                } else if items == 3 || items == 1 {
+                    // otherwise complete a set
+                    Trade::Yes
+                } else if items < target_items {
+                    Trade::Yes
                 } else {
                     Trade::No
                 }
@@ -465,6 +514,7 @@ fn sample_completion_time(settings: &Settings) -> Sample {
         pct_2pc.push(state.completion_pct(2));
 
         let completion = state.completion_pct(4);
+        assert!(weeks > 1 || completion == 0.0, "4pc completion should be impossible week 1");
         pct_4pc.push(completion);
 
         if completion >= 1.0 {
@@ -512,6 +562,12 @@ fn print_per_player(settings: &Settings, samples: &[Sample]) {
     }
 }
 
+#[derive(Serialize, Debug)]
+struct SimOutput<'a> {
+    settings: &'a Settings,
+    samples: &'a Vec<Sample>,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = Opts::from_args();
 
@@ -527,7 +583,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|_ix| sample_completion_time(&settings))
         .collect_into_vec(&mut samples);
 
-    std::fs::write(&opts.output, serde_json::to_vec(&samples)?)?;
+    std::fs::write(&opts.output, serde_json::to_vec(&SimOutput { settings: &settings, samples: &samples })?)?;
 
     let mut weeks = Data::new(samples.iter().map(|s| s.n_weeks as f64).collect::<Vec<_>>());
     let wasted_vaults = samples.iter().map(|s| s.wasted_vaults as f64).mean();

@@ -5,7 +5,7 @@ num_samples = 100000
 num_extra_vault_items = 3
 
 [trading_rule]
-target = "LeastPieces"
+target = "MostSetCompletionsLeastPieces"
 
 [members]
 Eisenpelz = "Monk"
