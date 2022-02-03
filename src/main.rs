@@ -73,6 +73,29 @@ enum Class {
     Warrior,
 }
 
+#[cfg(not(feature = "old_tokens"))]
+#[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq, Serialize)]
+enum Token {
+    Mystic,
+    Venerated,
+    Zenith,
+    Dreadful
+}
+
+#[cfg(not(feature = "old_tokens"))]
+impl Class {
+    fn into_token(self) -> Token {
+        use Class::*;
+        match self {
+            Druid | Hunter | Mage => Token::Mystic,
+            Paladin | Priest | Shaman => Token::Venerated,
+            Monk | Rogue | Warrior => Token::Zenith,
+            DemonHunter | DeathKnight | Warlock => Token::Dreadful,
+        }
+    }
+}
+
+#[cfg(feature = "old_tokens")]
 #[derive(Deserialize, Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 enum Token {
     Conqueror,
@@ -80,6 +103,7 @@ enum Token {
     Protector,
 }
 
+#[cfg(feature = "old_tokens")]
 impl Class {
     fn into_token(self) -> Token {
         use Class::*;
@@ -565,6 +589,7 @@ fn print_per_player(settings: &Settings, samples: &[Sample]) {
 #[derive(Serialize, Debug)]
 struct SimOutput<'a> {
     settings: &'a Settings,
+    players_ordered: &'a Vec<String>,
     samples: &'a Vec<Sample>,
 }
 
@@ -583,7 +608,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|_ix| sample_completion_time(&settings))
         .collect_into_vec(&mut samples);
 
-    std::fs::write(&opts.output, serde_json::to_vec(&SimOutput { settings: &settings, samples: &samples })?)?;
+    let names = settings.comp.members.keys().cloned().collect::<Vec<_>>();
+    std::fs::write(&opts.output, serde_json::to_vec(&SimOutput { settings: &settings, players_ordered: &names, samples: &samples })?)?;
 
     let mut weeks = Data::new(samples.iter().map(|s| s.n_weeks as f64).collect::<Vec<_>>());
     let wasted_vaults = samples.iter().map(|s| s.wasted_vaults as f64).mean();
