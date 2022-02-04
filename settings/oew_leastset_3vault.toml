@@ -1,0 +1,35 @@
+clears_per_week = ["Normal", "Heroic"]
+mythic_kills = [3, 4, 5, 6, 7, 7, 7, 8]
+mythic_first_slot = "Gloves"
+num_samples = 100000
+num_extra_vault_items = 3
+
+[trading_rule]
+target = "MostSetCompletionsLeastPieces"
+
+[members]
+Eisenpelz = "Monk"
+Vaelldur = "DemonHunter"
+Tendronas = "DemonHunter"
+Wings = "Rogue"
+Rav = "Rogue"
+Nanuss = "Warrior"
+Atela = "DeathKnight"
+Altenna = "Shaman"
+Nosimage = "Mage"
+Zuko = "Mage"
+Divisive = "Druid"
+Jop = "Druid"
+Flemingo = "Druid"
+Kim = "Priest"
+Heiji = "Priest"
+Ivan = "Hunter"
+Kap = "Hunter"
+Traltixx = "Hunter"
+Mesprit = "Warlock"
+Gucci = "Warlock"
+Sokchoy = "Priest"
+Kadmix = "Priest"
+Maelz = "Shaman"
+Velium = "Monk"
+Keegan = "Paladin"
