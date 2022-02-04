@@ -396,7 +396,7 @@ impl State {
             completion_week: vec![None; num_players],
             num_slots: vec![0; num_players],
             trading_rule: settings.trading_rule.clone(),
-            nonraid_vault_chance: Binomial::new(0.2, settings.num_extra_vault_items as u64)
+            nonraid_vault_chance: Binomial::new(0.06, settings.num_extra_vault_items as u64)
                 .unwrap(),
             wasted_drops: 0,
             wasted_vaults: 0,
